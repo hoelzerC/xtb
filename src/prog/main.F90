@@ -83,6 +83,7 @@ module xtb_prog_main
    use xtb_gfnff_param, only : gff_print
    use xtb_gfnff_topology, only : TPrintTopo
    use xtb_gfnff_convert, only : struc_convert
+   use xtb_gfnff_ffml, only : Tffml, set_ffml
    use xtb_scan
    use xtb_kopt
    use xtb_oniom, only : oniom_input
@@ -194,6 +195,7 @@ subroutine xtbMain(env, argParser)
    integer :: nproc
 
    type(TPrintTopo) :: printTopo ! gfnff topology printout list
+   type(Tffml)  :: ffml ! holds info for ML correction of GFN-FF calculation
 
    xenv%home = env%xtbhome
    xenv%path = env%xtbpath
@@ -202,7 +204,7 @@ subroutine xtbMain(env, argParser)
    ! ------------------------------------------------------------------------
    !> read the command line arguments
    call parseArguments(env, argParser, xcontrol, fnv, acc, lgrad, &
-      & restart, gsolvstate, strict, copycontrol, coffee, printTopo, oniom)
+      & restart, gsolvstate, strict, copycontrol, coffee, printTopo, ffml, oniom)
 
    nFiles = argParser%countFiles()
    select case(nFiles)
@@ -395,7 +397,7 @@ subroutine xtbMain(env, argParser)
    !> 2D => 3D STRUCTURE CONVERTER
    ! ------------------------------------------------------------------------
    if (mol%info%two_dimensional) then
-      call struc_convert (env,restart,mol,chk,egap,set%etemp,set%maxscciter, &
+      call struc_convert (env,restart,mol,ffml,chk,egap,set%etemp,set%maxscciter, &
                        &  set%optset%maxoptcycle,etot,g,sigma)
       struc_conversion_done = .true.
       mol%info%two_dimensional = .false.
@@ -1068,7 +1070,7 @@ end subroutine xtbMain
 
 !> Parse command line arguments and forward them to settings
 subroutine parseArguments(env, args, inputFile, paramFile, accuracy, lgrad, &
-      & restart, gsolvstate, strict, copycontrol, coffee, printTopo, oniom)
+      & restart, gsolvstate, strict, copycontrol, coffee, printTopo, ffml, oniom)
    use xtb_mctc_global, only : persistentEnv
 
    !> Name of error producer
@@ -1103,6 +1105,9 @@ subroutine parseArguments(env, args, inputFile, paramFile, accuracy, lgrad, &
 
    !> topology printout list
    type(TPrintTopo), intent(out) :: printTopo
+
+   ! holds info for ML correction of GFN-FF calculation
+   type(Tffml), intent(out)  :: ffml
 
    !> Print the gradient to file
    logical, intent(out) :: lgrad
@@ -1567,6 +1572,10 @@ subroutine parseArguments(env, args, inputFile, paramFile, accuracy, lgrad, &
          else
            call env%error("The wrtopo keyword is missing an argument.",source)
          endif
+
+      case('--ffml')  ! apply ML correction to GFN-FF calculation
+         call set_ffml(ffml)
+
       end select
       call args%nextFlag(flag)
    end do
