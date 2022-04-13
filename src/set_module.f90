@@ -1007,6 +1007,8 @@ subroutine set_runtyp(typ)
       set%runtyp = p_run_vomega
    case('vfukui')
       set%runtyp = p_run_vfukui
+   case('ml')
+      set%runtyp = p_run_ffml
    end select
    set1 = .false.
 end subroutine set_runtyp

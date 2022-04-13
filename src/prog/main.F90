@@ -83,7 +83,7 @@ module xtb_prog_main
    use xtb_gfnff_param, only : gff_print
    use xtb_gfnff_topology, only : TPrintTopo
    use xtb_gfnff_convert, only : struc_convert
-   use xtb_gfnff_ffml, only : Tffml, set_ffml
+   use xtb_gfnff_ffml, only : Tffml, calc_ML_correction, set_ffml
    use xtb_scan
    use xtb_kopt
    use xtb_oniom, only : oniom_input
@@ -397,10 +397,11 @@ subroutine xtbMain(env, argParser)
    !> 2D => 3D STRUCTURE CONVERTER
    ! ------------------------------------------------------------------------
    if (mol%info%two_dimensional) then
-      call struc_convert (env,restart,mol,ffml,chk,egap,set%etemp,set%maxscciter, &
+      call struc_convert (env,restart,mol,chk,egap,set%etemp,set%maxscciter, &
                        &  set%optset%maxoptcycle,etot,g,sigma)
       struc_conversion_done = .true.
       mol%info%two_dimensional = .false.
+      
     end if
 
    ! ------------------------------------------------------------------------
@@ -478,7 +479,7 @@ subroutine xtbMain(env, argParser)
          call env%terminate('This is an internal error, please define your runtypes!')
       case(p_run_scc,p_run_grad,p_run_opt,p_run_hess,p_run_ohess,p_run_bhess, &
             p_run_md,p_run_omd,p_run_path,p_run_screen, &
-            p_run_modef,p_run_mdopt,p_run_metaopt)
+            p_run_modef,p_run_mdopt,p_run_metaopt,p_run_ffml)
         if (set%mode_extrun.eq.p_ext_gfnff) then
             fnv=xfind(p_fname_param_gfnff)
         else
@@ -878,6 +879,28 @@ subroutine xtbMain(env, argParser)
       call write_energy_gff(env%unit,res,fres, &
         & (set%runtyp.eq.p_run_hess).or.(set%runtyp.eq.p_run_ohess).or.(set%runtyp.eq.p_run_bhess))
    end select  
+
+
+   ! ------------------------------------------------------------------------
+   !> ML correction for GFN-FF force field ( ffml ) 
+   if (set%runtyp.eq.p_run_ffml) then
+! Note: Have env,mol,etot,g,sigma,calc
+!  calc has %topo %gen %param
+!  calc%topo has e.g. %nb,bpair,blist,alist,tlist,vbond,vangl,vtors,qa, ...
+     select type(calc)
+       class default
+         call env%error('ML correction only valid for GFN-FF. Please add the --gfnff keyword.')
+       type is(TGFFCalculator)
+         write(*,*) 
+         call generic_header(iprop,'ML correction for GFN-FF',49,10)
+         write(*,*)
+         call calc_ML_correction(ffml,fname,calc%topo,mol)
+!         write(*,*) 'calc allocated: ',calc%topo%blist !@thomas delete
+     end select
+!     write(*,*) 'moltest: ',mol%xyz(:,1)
+!     write(*,*) 'etot: ', etot
+!     write(*,*) 'g:',g(:,1)
+   endif
 
 
    ! ------------------------------------------------------------------------
@@ -1573,8 +1596,12 @@ subroutine parseArguments(env, args, inputFile, paramFile, accuracy, lgrad, &
            call env%error("The wrtopo keyword is missing an argument.",source)
          endif
 
-      case('--ffml')  ! apply ML correction to GFN-FF calculation
-         call set_ffml(ffml)
+      case('--ml')  ! apply ML correction to GFN-FF calculation
+         !call set_ffml(ffml)
+         call set_runtyp('ml')
+
+ case('--fixedMD')  !@thomas delete important: dont need this anymore
+         ffml%fixMD=.True.
 
       end select
       call args%nextFlag(flag)

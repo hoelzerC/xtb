@@ -136,6 +136,7 @@ module xtb_setparam
    integer, parameter :: p_run_vipea  = 102
    integer, parameter :: p_run_vfukui = 103
    integer, parameter :: p_run_vomega = 104
+   integer, parameter :: p_run_ffml   = 213
 
    integer,private :: idum
 

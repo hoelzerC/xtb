@@ -23,7 +23,7 @@ module xtb_gfnff_convert
 contains
 
 subroutine struc_convert( &
-         & env,restart,mol,ffml,chk,egap,et,maxiter,maxcycle,&
+         & env,restart,mol,chk,egap,et,maxiter,maxcycle,&
          & etot,g,sigma)
   use xtb_mctc_accuracy, only : wp
   use xtb_gfnff_param
@@ -33,7 +33,6 @@ subroutine struc_convert( &
   use xtb_type_molecule
   use xtb_type_restart
   use xtb_gfnff_calculator, only : TGFFCalculator, newGFFCalculator
-  use xtb_gfnff_ffml, only : Tffml
   use xtb_type_data
   use xtb_restart
   use xtb_setmod
@@ -45,7 +44,6 @@ subroutine struc_convert( &
 ! Dummy -----------------------------------------------------------------------
   type(TEnvironment),intent(inout)            :: env
   type(TMolecule),intent(inout)               :: mol
-  type(Tffml), intent(in)                     :: ffml  ! info of ML correction for GFN-FF
   type(TRestart),intent(inout)                :: chk
   integer,intent(in)                          :: maxiter
   integer,intent(in)                          :: maxcycle
@@ -121,22 +119,13 @@ subroutine struc_convert( &
   do i=1, num_shift_runs
     if (i.ne.42) then  ! if in case you want an opt with the 2D init -> e.g. use if (i.ne.1)
       mol_shifted = mol
-      if (ffml%fixMD) then
-        ! create array with deterministic alternating shifts between -1 and 1 using sin()
-        do j=1, size(shift)
-          shift(j) = ((-1)**j)*sin(0.1*real(i)*real(j))**2
-        enddo
-        ! set temperature to 0K
-        set%temp_md  = 0.0_wp    ! md temperature 0 K
-      else
-        ! create array with random shifts: 0<= shift <1
-        call RANDOM_NUMBER(shift)
-        ! change signs of shifts randomly
-        do j=1, size(shift)
-          call RANDOM_NUMBER(sign_threshold)
-          if (sign_threshold.lt.0.5_wp) shift(j) = -1.0_wp*shift(j)
-        enddo
-      endif  
+      ! create array with random shifts: 0<= shift <1
+      call RANDOM_NUMBER(shift)
+      ! change signs of shifts randomly
+      do j=1, size(shift)
+        call RANDOM_NUMBER(sign_threshold)
+        if (sign_threshold.lt.0.5_wp) shift(j) = -1.0_wp*shift(j)
+      enddo
       mol_shifted%xyz(3,:) = mol_shifted%xyz(3,:) + shift  ! apply shifts
     endif
     
