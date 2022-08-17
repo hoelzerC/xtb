@@ -25,11 +25,12 @@ module xtb_gfnff_ffml
   use xtb_io_reader, only : readMolecule
   use xtb_io_writer, only : writeMolecule
   use mctc_io_filetype, only : filetype, getFileType => get_filetype
+  use forpy_mod
 
   implicit none
   private
 
-  public :: Tffml, calc_ML_correction, set_ffml
+  public :: Tffml, calc_ML_correction!, set_ffml
 
   ! holds info for ML correction of GFN-FF calculation
   type :: Tffml
@@ -40,29 +41,32 @@ module xtb_gfnff_ffml
 
 contains
 
-! setup type for FF calculation with ML correction
-subroutine set_ffml(self)
-  class(Tffml), intent(out) :: self
-  ! run deterministic MD simulation (0K temperature and fixed shifts)
-  self%fixMD = .true.
-!  self%runML = .true.
-end subroutine set_ffml
+!! setup type for FF calculation with ML correction
+!subroutine set_ffml(self)
+!  class(Tffml), intent(out) :: self
+!  ! run deterministic MD simulation (0K temperature and fixed shifts)
+!  self%fixMD = .true.
+!!  self%runML = .true.
+!end subroutine set_ffml
 
 ! the actual routine for the ML correction
   !@thomas check if all input is needed
-subroutine calc_ML_correction(ffml,fname,topo, mol)
-        type(Tffml), intent(in)        :: ffml
+subroutine calc_ML_correction(env,ffml,fname,topo, mol)
+  type(TEnvironment),intent(inout)            :: env
+  type(Tffml), intent(in)        :: ffml
   character(len=*), intent(in)    :: fname
   type(TGFFTopology), intent(in)  :: topo
   type(TMolecule), intent(in)     :: mol
 
+  type(TGFFTopology)              :: refTopo
   character(len=:), allocatable   :: cmd  !@thomas 
-  integer :: ich, sdf_ftype, maxoptcycle, scciter
+  integer :: ich, sdf_ftype, maxoptcycle, scciter, i
   type(TEnvironment) :: envtmp
   type(TMolecule)    :: moltmp
   type(TRestart) :: chktmp
   real(wp) :: egap, etemp, etot, stmp(3,3)
   real(wp), allocatable :: gtmp(:,:)
+  integer :: ierror
   ! trivial approach: just calling the gen_ref_struc.sh script
 if (.false.) then !<delete !@thomas 
   cmd="~/bin/gen_ref_struc_orig.sh "//fname
@@ -114,7 +118,7 @@ else !<delete
   stmp=0.0_wp
   allocate(gtmp(3,moltmp%n), source=0.0_wp)
   call ml_struc_convert(envtmp, .false., moltmp, chktmp, egap, &
-          etemp, scciter, maxoptcycle, etot, gtmp, stmp)
+          etemp, scciter, maxoptcycle, etot, gtmp, stmp, refTopo)
 
   !(7)! convert to original file format  ! use mctc file reader and writer
   call open_file(ich, 'ref_struc.xyz', 'w')
@@ -130,12 +134,18 @@ endif !<delete
 
 
   write(*,*)
+
+  !@thomas testing interaction with python functions !@thomas_mark01
+  call send_input_to_python_ML_receive_eg(env, mol%n, mol%xyz) 
+  ! finalize forpy 
+  call forpy_finalize
+
 end subroutine calc_ML_correction
 
 
 subroutine ml_struc_convert( &
          & env,restart,mol,chk,egap,et,maxiter,maxcycle,&
-         & etot,g,sigma)
+         & etot,g,sigma,refTopo)
   use xtb_mctc_accuracy, only : wp
   use xtb_gfnff_param
   use xtb_gfnff_setup
@@ -163,6 +173,7 @@ subroutine ml_struc_convert( &
   real(wp),intent(inout)                      :: egap
   real(wp),intent(inout)                      :: g(3,mol%n)
   real(wp),intent(inout)                      :: sigma(3,3)
+  type(TGFFTopology), intent(out)             :: refTopo
   logical,intent(in)                          :: restart
   character(len=:),allocatable                :: fnv
 ! Stack -----------------------------------------------------------------------
@@ -247,18 +258,7 @@ subroutine ml_struc_convert( &
     g_arr(i) = NORM2(g)                   ! store gradient norm
   enddo
 
-  ! always take geometry from first optimization unless unreasonable !@thomas TODO maybe take lowest e again??
   mol%xyz(:,:) = mol_xyz_arr(:,:,minloc(etot_arr, DIM=1))  ! keep xyz with lowest etot
-  ! TODO TODO TODO
-  ! if(g_arr(1).lt.50.0_wp) then
-  !   mol%xyz=mol_xyz_arr(:,:,1)
-  ! elseif(g_arr(2).lt.50.0_wp) then
-  !   mol%xyz=mol_xyz_arr(:,:,2)
-  ! elseif(g_arr(3).lt.50.0_wp) then
-  !   mol%xyz=mol_xyz_arr(:,:,3)
-  ! else
-  !   call env%error('Structure converter could not optimize geometry properly.')
-  ! endif
 
     if (allocated(fnv)) then
       set%opt_logfile = fnv
@@ -294,6 +294,9 @@ subroutine ml_struc_convert( &
   call geometry_optimization &
       &     (env,mol,chk,calc2,   &
       &      egap,set%etemp,maxiter,maxcycle,etot,g,sigma,p_olev_crude,.false.,.true.,fail)
+  ! save reference topology
+  refTopo=calc2%topo
+
 !------------------------------------------------------------------------------
   write(*,*)
   write(*,'(10x," ------------------------------------------------- ")')
@@ -305,5 +308,107 @@ subroutine ml_struc_convert( &
   call gfnff_param_dealloc(calc%topo)
 
 end subroutine ml_struc_convert
+
+
+subroutine send_input_to_python_ML_receive_eg(env,n, xyz)
+  use forpy_mod
+  use iso_fortran_env, only: real64
+  type(TEnvironment),intent(inout)            :: env
+  integer, intent(in)    :: n
+  real(wp), intent(in)   :: xyz(3,n) !@thomas adjust for real deal
+  integer          :: ierror, e  ! return value for forpy methods (error value)
+  type(list)       :: paths      ! Need cwd of forpy_mod.F90 !@thomas I think thats main need here
+  type(module_py)  :: ml_module    ! module with all the python functions etc for ML part
+                                   ! for developement I created ml_mod.py to test interoperability 
+  type(object)     :: receive_obj  ! python object received from function call or similar
+  type(tuple)      :: args  ! python tuple to feed into ml_function
+  type(ndarray)    :: xyz_arr, arr1, resarr
+  real(wp)   :: xyz_local(3,n) !@thomas adjust for real deal
+  real(wp)  :: sumCoords
+  integer :: i,j,istatus,fart1(3)
+  character (len=130) :: cwd ! path to current working directory
+  character, allocatable :: emsg(:) ! error message
+  character(len=*), parameter :: source = "gfnff_ffml"
+
+   double precision, dimension(:,:), allocatable :: coefficient !test online exmpl
+!   real(kind=real64), dimension(:,:), allocatable :: coefficient !test online exmpl
+   type(ndarray) :: cof !test online example
+
+  ! initialize forpy
+  !@thomas debug: das schon ganz am anfang in src/prog/main.f90 zu init. funzt auch nicht
+  ierror = forpy_initialize() !@thomas TODO debug: I have NO_NUMPY_ERROR but I need numpy
+                              !  for ndarray_create()
+  write(*,*) ' Initiallized forpy with ierror=',ierror
+  !@thomas_mark01 goto call
+
+  xyz_local=xyz
+  write(*,*) 'xyz array (:,1:5):'
+  write(*,'(3f8.2)') xyz_local(:,1:5)
+
+  ! add path of python module file to paths
+  !@thomas TODO relativer pfad!?! Geht nicht wenn jmd die xtb binary verwendet -> error handling
+  ! ist halt nicht gegeben das der user das file überhaupt hat. Also unnötig das 
+  ! irgendwie weiter zu suchen, ggf kann man gucken obs ne möglichkeit gibt das 
+  ! zu "installieren" oder sowas
+  ierror = get_sys_path(paths)
+  ierror = paths%append(".") ! the module ml_mod.py should be in cwd
+  write(*,*) 'Called paths with ierror=',ierror
+  ierror = print_py(paths)
+  write(*,*) 'Print_py paths with ierror=',ierror !
+  ierror = import_py(ml_module, "ml_mod") ! omit the .py
+  !write(*,*) 'Called import with ierror=',ierror
+  if(ierror.eq.-1)then ! tell user to get module if not found
+    !@thomas TODO adjust name of ml_mod.py
+    call env%error("Could not import ml_mod.py. Please copy the file into your current working &
+      &directory. It is available at https://github.com/grimme-lab/xtb/tree/main/src/gfnff",source)
+  endif
+
+  !@thomas delete: test if loaded properly
+  ierror = call_py(receive_obj, ml_module, "testFct")
+  write(*,*) 'Called testFct with ierror=',ierror
+  ierror = call_py(receive_obj, ml_module, "testPythonsImport")
+  write(*,*) 'Called testPythonsImport with ierror=',ierror
+
+  ! test online example
+  allocate(coefficient(3,3))
+  call random_number(coefficient)
+!  ierror = ndarray_create(cof, coefficient)
+  !e = ndarray_create(cof, coefficient)
+ 
+  ! create python array from xyz
+!@thomas debug: Scheint an PyObject_... zu liegen irgendwie die verbindung zu c falsch?
+! cpython ?? -> google "call protocol PyObject"
+!  e = ndarray_create(xyz_arr, xyz_local)
+!  ierror = ndarray_create_nocopy(xyz_arr, xyz_local)
+!  e = ndarray_create(arr1, fart1)
+!   ierror = ndarray_create_empty(resarr, 3)
+!write(*,*) 'Called ndarr_empty with ierror=',ierror
+!   ierror = print_py(resarr)
+!write(*,*) 'Called print_py with ierror=',ierror
+
+  ! create tuple (args) containing arguments for function call
+if(.false.)then !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+  ierror = tuple_create(args, 1)
+  ierror = args%setitem(0, xyz_arr)
+  ! call function from the python module
+  ierror = call_py(receive_obj, ml_module, "receive_ml_input_send_output", args)
+
+  ! print received object
+  write(*,*) 'Received energy (sum of coords):'
+  ierror = print_py(receive_obj)
+  write(*,*) 'X------------------------------X'
+  ! calculate sum of coords in fortran
+  sumCoords=0.0_wp
+  do i=1,3
+    do j=1,n
+      sumCoords=sumCoords+xyz(i,j)
+    enddo
+  enddo
+  write(*,*) 'Calculated energy (sum of coords):'
+  write(*,*) sumCoords
+  write(*,*) 'X--------------------------------X'
+endif ! false !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+end subroutine
 
 end module xtb_gfnff_ffml
