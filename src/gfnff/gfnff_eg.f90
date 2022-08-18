@@ -88,8 +88,9 @@ contains
       logical makeq
 
       real*8 edisp,ees,ebond,eangl,etors,erep,ehb,exb,ebatm,eext
+      real*8 eatoms(n)
       real*8 :: gsolv, gborn, ghb, gsasa, gshift
-
+      
       integer i,j,k,l,m,ij,nd3
       integer ati,atj,iat,jat
       integer hbA,hbB
@@ -113,7 +114,7 @@ contains
       real(wp) :: dispthr, cnthr, repthr, hbthr1, hbthr2
 
       call gfnff_thresholds(accuracy, dispthr, cnthr, repthr, hbthr1, hbthr2)
-
+      
       g  =  0
       exb = 0
       ehb = 0
@@ -125,6 +126,8 @@ contains
       etors=0
       ebatm=0
       eext =0
+
+      eatoms = 0.0d0
 
       gsolv = 0.0d0
       gsasa = 0.0d0
@@ -209,7 +212,7 @@ contains
 !!!!!!!!!!!!!
 
       if (pr) call timer%measure(2,'non bonded repulsion')
-      !$omp parallel do default(none) reduction(+:erep, g) &
+      !$omp parallel do default(none) reduction(+:erep,eatoms, g) &
       !$omp shared(n, at, xyz, srab, sqrab, repthr, topo, param) &
       !$omp private(iat, jat, m, ij, ati, atj, rab, r2, r3, t8, t16, t19, t26, t27)
       do iat=1,n
@@ -227,6 +230,10 @@ contains
          t8 =t16*topo%alphanb(ij)
          t26=exp(-t8)*param%repz(ati)*param%repz(atj)*param%repscaln
          erep=erep+t26/rab !energy
+
+         eatoms(iat) = eatoms(iat) + t26/rab* 0.5
+         eatoms(jat) = eatoms(jat) + t26/rab* 0.5
+
          t27=t26*(1.5d0*t8+1.0d0)/t19
          r3 =(xyz(:,iat)-xyz(:,jat))*t27
          g(:,iat)=g(:,iat)-r3
@@ -236,6 +243,8 @@ contains
       !$omp end parallel do
       if (pr) call timer%measure(2)
 
+      
+
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 ! just a extremely crude mode for 2D-3D conversion
 ! i.e. an harmonic potential with estimated Re
@@ -243,7 +252,7 @@ contains
 
       if (version == gffVersion%harmonic2020) then
       ebond=0
-      !$omp parallel do default(none) reduction(+:ebond, g) &
+      !$omp parallel do default(none) reduction(+:ebond,eatoms, g) &
       !$omp shared(topo, param, xyz, at) private(i, iat, jat, rab, r2, r3, rn, dum)
       do i=1,topo%nbond
          iat=topo%blist(1,i)
@@ -277,8 +286,9 @@ contains
 
       if (pr) call timer%measure(4,'EEQ energy and q')
       call goed_gfnff(env,accuracy.gt.1,n,at,sqrab,srab,&         ! modified version
-     &                dfloat(ichrg),eeqtmp,cn,nlist%q,ees,solvation,param,topo)  ! without dq/dr
+     &                dfloat(ichrg),eeqtmp,cn,nlist%q,ees, eatoms,solvation,param,topo)  ! without dq/dr
       if (pr) call timer%measure(4)
+
 
 !!!!!!!!
 !D3(BJ)
@@ -287,10 +297,11 @@ contains
       if (pr) call timer%measure(5,'D3')
       if(nd3.gt.0) then
          call d3_gradient(topo%dispm, n, at, xyz, nd3, d3list, topo%zetac6, &
-            & param%d3r0, sqrtZr4r2, 4.0d0, param%dispscale, cn, dcn, edisp, g)
+            & param%d3r0, sqrtZr4r2, 4.0d0, param%dispscale, cn, dcn, edisp, eatoms, g)
       endif
       deallocate(d3list)
       if (pr) call timer%measure(5)
+
 
 !!!!!!!!
 ! ES part
@@ -347,7 +358,7 @@ contains
       call gfnffdrab(n,at,xyz,cn,dcn,topo%nbond,topo%blist,rab0,grab0)
       deallocate(dcn)
 
-      !$omp parallel do default(none) reduction(+:g, ebond) &
+      !$omp parallel do default(none) reduction(+:g, ebond, eatoms) &
       !$omp shared(grab0, topo, param, rab0, srab, xyz, at, hb_cn, hb_dcn, n) &
       !$omp private(i, k, iat, jat, ij, rab, rij, drij, t8, dr, dum, yy, &
       !$omp& dx, dy, dz, t4, t5, t6, ati, atj)
@@ -361,20 +372,22 @@ contains
          rij=rab0(i)
          drij=grab0(:,:,i)
          if (topo%nr_hb(i).ge.1) then
-            call egbond_hb(i,iat,jat,rab,rij,drij,hb_cn,hb_dcn,n,at,xyz,ebond,g,param,topo)
+            call egbond_hb(i,iat,jat,rab,rij,drij,hb_cn,hb_dcn,n,at,xyz,ebond,eatoms,g,param,topo)
          else
-            call egbond(i,iat,jat,rab,rij,drij,n,at,xyz,ebond,g,topo)
+            call egbond(i,iat,jat,rab,rij,drij,n,at,xyz,ebond,eatoms,g,topo)
          end if
       enddo
       !$omp end parallel do
 
       deallocate(hb_dcn)
 
+
+
 !!!!!!!!!!!!!!!!!!
 ! bonded REP
 !!!!!!!!!!!!!!!!!!
 
-      !$omp parallel do default(none) reduction(+:erep, g) &
+      !$omp parallel do default(none) reduction(+:erep,eatoms, g) &
       !$omp shared(topo, param, at, sqrab, srab, xyz) &
       !$omp private(i, iat, jat, ij, xa, ya, za, dx, dy, dz, r2, rab, ati, atj, &
       !$omp& alpha, repab, t16, t19, t26, t27)
@@ -397,7 +410,11 @@ contains
          t16=r2**0.75d0
          t19=t16*t16
          t26=exp(-alpha*t16)*repab
+
          erep=erep+t26/rab !energy
+         eatoms(iat)=eatoms(iat)+t26/rab*0.5
+         eatoms(jat)=eatoms(jat)+t26/rab*0.5
+
          t27=t26*(1.5d0*alpha*t16+1.0d0)/t19
          g(1,iat)=g(1,iat)-dx*t27
          g(2,iat)=g(2,iat)-dy*t27
@@ -416,7 +433,7 @@ contains
 
       if (pr) call timer%measure(8,'bend and torsion')
       if(topo%nangl.gt.0)then
-         !$omp parallel do default(none) reduction (+:eangl, g) &
+         !$omp parallel do default(none) reduction (+:eangl, eatoms, g) &
          !$omp shared(n, at, xyz, topo, param) &
          !$omp private(m, j, i, k, etmp, g3tmp)
          do m=1,topo%nangl
@@ -427,7 +444,12 @@ contains
             g(1:3,j)=g(1:3,j)+g3tmp(1:3,1)
             g(1:3,i)=g(1:3,i)+g3tmp(1:3,2)
             g(1:3,k)=g(1:3,k)+g3tmp(1:3,3)
+
             eangl=eangl+etmp
+            eatoms(j)=eatoms(j)+etmp*1/3
+            eatoms(i)=eatoms(i)+etmp*1/3
+            eatoms(k)=eatoms(k)+etmp*1/3
+
          enddo
          !$omp end parallel do
       endif
@@ -437,7 +459,7 @@ contains
 !!!!!!!!!!!!!!!!!!
 
       if(topo%ntors.gt.0)then
-         !$omp parallel do default(none) reduction(+:etors, g) &
+         !$omp parallel do default(none) reduction(+:etors, eatoms, g) &
          !$omp shared(param, topo, n, at, xyz) &
          !$omp private(m, i, j, k, l, etmp, g4tmp)
          do m=1,topo%ntors
@@ -451,6 +473,11 @@ contains
             g(1:3,k)=g(1:3,k)+g4tmp(1:3,3)
             g(1:3,l)=g(1:3,l)+g4tmp(1:3,4)
             etors=etors+etmp
+
+            eatoms(i)=eatoms(i)+etmp*1/4
+            eatoms(j)=eatoms(j)+etmp*1/4
+            eatoms(k)=eatoms(k)+etmp*1/4
+            eatoms(l)=eatoms(l)+etmp*1/4
          enddo
          !$omp end parallel do
       endif
@@ -462,7 +489,7 @@ contains
 
       if (pr) call timer%measure(9,'bonded ATM')
       if(topo%nbatm.gt.0) then
-         !$omp parallel do default(none) reduction(+:ebatm, g) &
+         !$omp parallel do default(none) reduction(+:ebatm,eatoms, g) &
          !$omp shared(n, at, xyz, srab, sqrab, topo, param) &
          !$omp private(i, j, k, l, etmp, g3tmp)
          do i=1,topo%nbatm
@@ -473,7 +500,11 @@ contains
             g(1:3,j)=g(1:3,j)+g3tmp(1:3,1)
             g(1:3,k)=g(1:3,k)+g3tmp(1:3,2)
             g(1:3,l)=g(1:3,l)+g3tmp(1:3,3)
+
             ebatm=ebatm+etmp
+            eatoms(j)=eatoms(j)+etmp*1/3
+            eatoms(k)=eatoms(k)+etmp*1/3
+            eatoms(l)=eatoms(l)+etmp*1/3
          enddo
          !$omp end parallel do
       endif
@@ -486,7 +517,7 @@ contains
       if (pr) call timer%measure(10,'HB/XB (incl list setup)')
 
       if(nlist%nhb1.gt.0) then
-         !$omp parallel do default(none) reduction(+:ehb, g) &
+         !$omp parallel do default(none) reduction(+:ehb,eatoms, g) &
          !$omp shared(topo, nlist, param, n, at, xyz, sqrab, srab) &
          !$omp private(i, j, k, l, etmp, g3tmp)
          do i=1,nlist%nhb1
@@ -497,7 +528,12 @@ contains
             g(1:3,j)=g(1:3,j)+g3tmp(1:3,1)
             g(1:3,k)=g(1:3,k)+g3tmp(1:3,2)
             g(1:3,l)=g(1:3,l)+g3tmp(1:3,3)
+
             ehb=ehb+etmp
+            eatoms(j)=eatoms(j)+etmp*1/3
+            eatoms(k)=eatoms(k)+etmp*1/3
+            eatoms(l)=eatoms(l)+etmp*1/3
+
             nlist%hbe1(i)=etmp ! HB energies  
          enddo
          !$omp end parallel do
@@ -505,7 +541,7 @@ contains
 
 
       if(nlist%nhb2.gt.0) then
-         !$omp parallel do default(none) reduction(+:ehb, g) &
+         !$omp parallel do default(none) reduction(+:ehb, eatoms, g) &
          !$omp shared(topo, nlist, param, n, at, xyz, sqrab, srab) &
          !$omp private(i, j, k, l, etmp, g5tmp)
          do i=1,nlist%nhb2
@@ -530,7 +566,12 @@ contains
                   & etmp,g5tmp,param,topo)
             end if
             g=g+g5tmp
+
             ehb=ehb+etmp
+            eatoms(j)=eatoms(j)+etmp*1/3
+            eatoms(k)=eatoms(k)+etmp*1/3
+            eatoms(l)=eatoms(l)+etmp*1/3
+
             nlist%hbe2(i)=etmp
          enddo
          !$omp end parallel do
@@ -541,7 +582,7 @@ contains
 !!!!!!!!!!!!!!!!!!
 
       if(nlist%nxb.gt.0) then
-         !$omp parallel do default(none) reduction(+:exb, g) &
+         !$omp parallel do default(none) reduction(+:exb, eatoms, g) &
          !$omp shared(topo, nlist, param, n, at, xyz) &
          !$omp private(i, j, k, l, etmp, g3tmp)
          do i=1,nlist%nxb
@@ -552,7 +593,12 @@ contains
             g(1:3,j)=g(1:3,j)+g3tmp(1:3,1)
             g(1:3,k)=g(1:3,k)+g3tmp(1:3,2)
             g(1:3,l)=g(1:3,l)+g3tmp(1:3,3)
+
             exb=exb+etmp
+            eatoms(j)=eatoms(j)+etmp*1/3
+            eatoms(k)=eatoms(k)+etmp*1/3
+            eatoms(l)=eatoms(l)+etmp*1/3
+
             nlist%hbe3(i)=etmp
          enddo
          !$omp end parallel do
@@ -568,8 +614,13 @@ contains
             r3(:) =-nlist%q(i)*efield(:)
             g(:,i)= g(:,i) + r3(:)
             eext = eext + r3(1)*(xyz(1,i)-topo%xyze0(1,i))+&
-     &                    r3(2)*(xyz(2,i)-topo%xyze0(2,i))+&
-     &                    r3(3)*(xyz(3,i)-topo%xyze0(3,i))
+            &             r3(2)*(xyz(2,i)-topo%xyze0(2,i))+&
+            &             r3(3)*(xyz(3,i)-topo%xyze0(3,i))
+
+            eatoms(i) = eatoms(i) + r3(1)*(xyz(1,i)-topo%xyze0(1,i))+&
+            &                       r3(2)*(xyz(2,i)-topo%xyze0(2,i))+&
+            &                       r3(3)*(xyz(3,i)-topo%xyze0(3,i))
+
          enddo
       endif
 
@@ -580,6 +631,21 @@ contains
      &           + eangl + etors + ehb + exb + ebatm + eext &
      &           + gsolv
 
+!@thor delete section, write eatoms in topo file
+
+open(111, file = 'gfnff_eatoms',action='write')
+ 
+   ! write difference in first line to check correctness
+   write (111,*) etot -sum(eatoms), NEW_LINE('A')
+   
+   do i=1, n
+
+   write(111,'(F0.12)') eatoms(i)
+
+end do 
+close(111) 
+
+!@thor end delete section
 !!!!!!!!!!!!!!!!!!
 ! printout
 !!!!!!!!!!!!!!!!!!
@@ -602,7 +668,7 @@ contains
         cn = 0
 !       asymtotically for R=inf, Etot is the SIE contaminted EES
 !       which is computed here to get the atomization energy De,n,at(n)
-        call goed_gfnff(env,.true.,n,at,sqrab,srab,dfloat(ichrg),eeqtmp,cn,qtmp,eesinf,solvation,param,topo)
+        call goed_gfnff(env,.true.,n,at,sqrab,srab,dfloat(ichrg),eeqtmp,cn,qtmp,eesinf,eatoms,solvation,param,topo)
         de=-(etot - eesinf)
       endif
 !     write resusts to res type
@@ -629,7 +695,7 @@ contains
 
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
-      subroutine egbond(i,iat,jat,rab,rij,drij,n,at,xyz,e,g,topo)
+      subroutine egbond(i,iat,jat,rab,rij,drij,n,at,xyz,e,eatoms,g,topo)
       implicit none
       !Dummy
       type(TGFFTopology), intent(in) :: topo
@@ -643,6 +709,7 @@ contains
       real*8,intent(in)    :: drij(3,n)
       real*8,intent(in)    :: xyz(3,n)
       real*8,intent(inout) :: e
+      real*8,intent(inout) :: eatoms(n)
       real*8,intent(inout) :: g(3,n)
       !Stack
       integer j,k
@@ -655,6 +722,10 @@ contains
          dr =rab-rij
          dum=topo%vbond(3,i)*exp(-t8*dr**2)
          e=e+dum                      ! bond energy
+
+         eatoms(iat)=eatoms(iat)+dum*0.5
+         eatoms(jat)=eatoms(jat)+dum*0.5
+
          yy=2.0d0*t8*dr*dum
          dx=xyz(1,iat)-xyz(1,jat)
          dy=xyz(2,iat)-xyz(2,jat)
@@ -679,7 +750,7 @@ contains
 
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
-      subroutine egbond_hb(i,iat,jat,rab,rij,drij,hb_cn,hb_dcn,n,at,xyz,e,g,param,topo)
+      subroutine egbond_hb(i,iat,jat,rab,rij,drij,hb_cn,hb_dcn,n,at,xyz,e,eatoms,g,param,topo)
       implicit none
       !Dummy
       type(TGFFData), intent(in) :: param
@@ -696,6 +767,7 @@ contains
       real*8,intent(in)    :: hb_cn(n)
       real*8,intent(in)    :: hb_dcn(3,n,n)
       real*8,intent(inout) :: e
+      real*8,intent(inout) :: eatoms(n)
       real*8,intent(inout) :: g(3,n)
       !Stack
       integer j,k
@@ -722,6 +794,10 @@ contains
          dr =rab-rij
          dum=topo%vbond(3,i)*exp(-t8*dr**2)
          e=e+dum                      ! bond energy
+
+         eatoms(iat) = eatoms(iat) + dum *0.5
+         eatoms(jat) = eatoms(jat) + dum *0.5
+
          yy=2.0d0*t8*dr*dum
          dx=xyz(1,iat)-xyz(1,jat)
          dy=xyz(2,iat)-xyz(2,jat)
@@ -1235,7 +1311,7 @@ contains
 !       based on charge densities obtained by a neural network
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
-      subroutine goed_gfnff(env,single,n,at,sqrab,r,chrg,eeqtmp,cn,q,es,gbsa,param,topo)
+      subroutine goed_gfnff(env,single,n,at,sqrab,r,chrg,eeqtmp,cn,q,es,eatoms,gbsa,param,topo)
       use xtb_mctc_accuracy, only : wp, sp
       use xtb_mctc_la
       implicit none
@@ -1252,6 +1328,7 @@ contains
       real(wp),intent(in)  :: cn(n)      ! CN
       real(wp),intent(out) :: q(n)       ! output charges
       real(wp),intent(out) :: es         ! ES energy
+      real(wp),intent(inout) :: eatoms(n)     ! atomwise energies
       real(wp),intent(out) :: eeqtmp(2,n*(n+1)/2)    ! intermediates
       type(TBorn), allocatable, intent(in) :: gbsa
 
@@ -1343,11 +1420,17 @@ contains
       ii = i*(i-1)/2
       do j=1,i-1
          ij = ii+j
-         tmp   =eeqtmp(2,ij)
+         tmp   = eeqtmp(2,ij)
          es = es + q(i)*q(j)*tmp/r(ij)
+
+         eatoms(i) = eatoms(i) + q(i)*q(j)*tmp/r(ij)*0.5
+         eatoms(j) = eatoms(j) + q(i)*q(j)*tmp/r(ij)*0.5
       enddo
       es = es - q(i)*(topo%chieeq(i) + param%cnf(at(i))*sqrt(cn(i))) &
-     &        + q(i)*q(i)*0.5d0*(topo%gameeq(i)+tsqrt2pi/sqrt(topo%alpeeq(i)))
+      &       + q(i)*q(i)*0.5d0*(topo%gameeq(i)+tsqrt2pi/sqrt(topo%alpeeq(i)))
+
+      eatoms(i) = eatoms(i) - q(i)*(topo%chieeq(i) + param%cnf(at(i))*sqrt(cn(i))) &
+      &                     + q(i)*q(i)*0.5d0*(topo%gameeq(i)+tsqrt2pi/sqrt(topo%alpeeq(i)))
       enddo
 
       !work = x
