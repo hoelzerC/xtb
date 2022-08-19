@@ -18,7 +18,7 @@
 option(
   'la_backend',
   type: 'combo',
-  value: 'mkl-static',
+  value: 'mkl',
   choices: ['mkl', 'mkl-rt', 'mkl-static', 'openblas', 'netlib', 'custom'],
   description: 'Linear algebra backend for program.',
 )

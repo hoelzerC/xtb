@@ -352,9 +352,10 @@ subroutine send_input_to_python_ML_receive_eg(env,n, xyz)
   ! zu "installieren" oder sowas
   ierror = get_sys_path(paths)
   ierror = paths%append(".") ! the module ml_mod.py should be in cwd
+!  ierror = paths%append("/home/thor/miniconda3/envs/ffml") ! my absolute path to python
+!  ierror = paths%append("/home/thor/miniconda3/envs/ffml/lib") ! my absolute path to python
+!  ierror = paths%append("/home/thor/miniconda3/envs/ffml/bin") ! my absolute path to python
   write(*,*) 'Called paths with ierror=',ierror
-  ierror = print_py(paths)
-  write(*,*) 'Print_py paths with ierror=',ierror !
   ierror = import_py(ml_module, "ml_mod") ! omit the .py
   !write(*,*) 'Called import with ierror=',ierror
   if(ierror.eq.-1)then ! tell user to get module if not found
@@ -363,51 +364,29 @@ subroutine send_input_to_python_ML_receive_eg(env,n, xyz)
       &directory. It is available at https://github.com/grimme-lab/xtb/tree/main/src/gfnff",source)
   endif
 
-  !@thomas delete: test if loaded properly
+!  !@thomas delete: test if loaded properly
   ierror = call_py(receive_obj, ml_module, "testFct")
   write(*,*) 'Called testFct with ierror=',ierror
-  ierror = call_py(receive_obj, ml_module, "testPythonsImport")
-  write(*,*) 'Called testPythonsImport with ierror=',ierror
-
-  ! test online example
-  allocate(coefficient(3,3))
-  call random_number(coefficient)
-!  ierror = ndarray_create(cof, coefficient)
-  !e = ndarray_create(cof, coefficient)
- 
-  ! create python array from xyz
-!@thomas debug: Scheint an PyObject_... zu liegen irgendwie die verbindung zu c falsch?
-! cpython ?? -> google "call protocol PyObject"
-!  e = ndarray_create(xyz_arr, xyz_local)
-!  ierror = ndarray_create_nocopy(xyz_arr, xyz_local)
-!  e = ndarray_create(arr1, fart1)
-!   ierror = ndarray_create_empty(resarr, 3)
-!write(*,*) 'Called ndarr_empty with ierror=',ierror
-!   ierror = print_py(resarr)
-!write(*,*) 'Called print_py with ierror=',ierror
 
   ! create tuple (args) containing arguments for function call
-if(.false.)then !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+  ierror = ndarray_create(xyz_arr, xyz_local)
   ierror = tuple_create(args, 1)
   ierror = args%setitem(0, xyz_arr)
+!  ierror = print_py(args)
   ! call function from the python module
   ierror = call_py(receive_obj, ml_module, "receive_ml_input_send_output", args)
+  write(*,*) 'Called receive_send_fct with ierror=',ierror
+  ! TODO   ierror above is -1 @thomas 2022 08 18
+  ! xyz_local wird aber richtig übergeben (energy ist gleich)
 
+  !print sum(abs(xyz_local)) for reference
+  write(*,'(a,f25.15)') 'Fortran: Energy=',SUM(abs(xyz_local))
+
+if(.false.)then !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
   ! print received object
   write(*,*) 'Received energy (sum of coords):'
   ierror = print_py(receive_obj)
   write(*,*) 'X------------------------------X'
-  ! calculate sum of coords in fortran
-  sumCoords=0.0_wp
-  do i=1,3
-    do j=1,n
-      sumCoords=sumCoords+xyz(i,j)
-    enddo
-  enddo
-  write(*,*) 'Calculated energy (sum of coords):'
-  write(*,*) sumCoords
-  write(*,*) 'X--------------------------------X'
-endif ! false !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
 end subroutine
 
