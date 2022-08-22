@@ -26,11 +26,12 @@ module xtb_gfnff_ffml
   use xtb_io_writer, only : writeMolecule
   use mctc_io_filetype, only : filetype, getFileType => get_filetype
   use forpy_mod
-
+  
   implicit none
   private
 
-  public :: Tffml, calc_ML_correction!, set_ffml
+  public :: Tffml, calc_ML_correction
+
 
   ! holds info for ML correction of GFN-FF calculation
   type :: Tffml
@@ -54,6 +55,7 @@ contains
 subroutine calc_ML_correction(env,ffml,fname,topo, mol)
   type(TEnvironment),intent(inout)            :: env
   type(Tffml), intent(in)        :: ffml
+
   character(len=*), intent(in)    :: fname
   type(TGFFTopology), intent(in)  :: topo
   type(TMolecule), intent(in)     :: mol
@@ -61,12 +63,15 @@ subroutine calc_ML_correction(env,ffml,fname,topo, mol)
   type(TGFFTopology)              :: refTopo
   character(len=:), allocatable   :: cmd  !@thomas 
   integer :: ich, sdf_ftype, maxoptcycle, scciter, i
+
   type(TEnvironment) :: envtmp
   type(TMolecule)    :: moltmp
   type(TRestart) :: chktmp
   real(wp) :: egap, etemp, etot, stmp(3,3)
   real(wp), allocatable :: gtmp(:,:)
+
   integer :: ierror
+  
   ! trivial approach: just calling the gen_ref_struc.sh script
 if (.false.) then !<delete !@thomas 
   cmd="~/bin/gen_ref_struc_orig.sh "//fname
@@ -120,6 +125,7 @@ else !<delete
   call ml_struc_convert(envtmp, .false., moltmp, chktmp, egap, &
           etemp, scciter, maxoptcycle, etot, gtmp, stmp, refTopo)
 
+
   !(7)! convert to original file format  ! use mctc file reader and writer
   call open_file(ich, 'ref_struc.xyz', 'w')
   call writeMolecule(moltmp, ich, format=fileType%xyz, energy=etot, &
@@ -146,6 +152,7 @@ end subroutine calc_ML_correction
 subroutine ml_struc_convert( &
          & env,restart,mol,chk,egap,et,maxiter,maxcycle,&
          & etot,g,sigma,refTopo)
+
   use xtb_mctc_accuracy, only : wp
   use xtb_gfnff_param
   use xtb_gfnff_setup
@@ -174,6 +181,7 @@ subroutine ml_struc_convert( &
   real(wp),intent(inout)                      :: g(3,mol%n)
   real(wp),intent(inout)                      :: sigma(3,3)
   type(TGFFTopology), intent(out)             :: refTopo
+
   logical,intent(in)                          :: restart
   character(len=:),allocatable                :: fnv
 ! Stack -----------------------------------------------------------------------
@@ -260,6 +268,7 @@ subroutine ml_struc_convert( &
 
   mol%xyz(:,:) = mol_xyz_arr(:,:,minloc(etot_arr, DIM=1))  ! keep xyz with lowest etot
 
+
     if (allocated(fnv)) then
       set%opt_logfile = fnv
     else
@@ -294,8 +303,10 @@ subroutine ml_struc_convert( &
   call geometry_optimization &
       &     (env,mol,chk,calc2,   &
       &      egap,set%etemp,maxiter,maxcycle,etot,g,sigma,p_olev_crude,.false.,.true.,fail)
+
   ! save reference topology
   refTopo=calc2%topo
+
 
 !------------------------------------------------------------------------------
   write(*,*)

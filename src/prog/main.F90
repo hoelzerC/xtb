@@ -197,7 +197,6 @@ subroutine xtbMain(env, argParser)
    type(TPrintTopo) :: printTopo ! gfnff topology printout list
    type(Tffml)  :: ffml ! holds info for ML correction of GFN-FF calculation
 
-
    xenv%home = env%xtbhome
    xenv%path = env%xtbpath
 
