@@ -136,7 +136,7 @@ endif !<delete
   write(*,*)
 
   !@thomas testing interaction with python functions !@thomas_mark01
-  call send_input_to_python_ML_receive_eg(env, mol%n, mol%xyz) 
+  call send_input_to_python_ML_receive_eg(env, mol%n, mol, topo) 
   ! finalize forpy 
   call forpy_finalize
 
@@ -310,40 +310,34 @@ subroutine ml_struc_convert( &
 end subroutine ml_struc_convert
 
 
-subroutine send_input_to_python_ML_receive_eg(env,n, xyz)
+subroutine send_input_to_python_ML_receive_eg(env,n, mol, topo)
   use forpy_mod
   use iso_fortran_env, only: real64
   type(TEnvironment),intent(inout)            :: env
-  integer, intent(in)    :: n
-  real(wp), intent(in)   :: xyz(3,n) !@thomas adjust for real deal
-  integer          :: ierror, e  ! return value for forpy methods (error value)
-  type(list)       :: paths      ! Need cwd of forpy_mod.F90 !@thomas I think thats main need here
-  type(module_py)  :: ml_module    ! module with all the python functions etc for ML part
-                                   ! for developement I created ml_mod.py to test interoperability 
-  type(object)     :: receive_obj  ! python object received from function call or similar
-  type(tuple)      :: args  ! python tuple to feed into ml_function
-  type(ndarray)    :: xyz_arr, arr1, resarr
-  real(wp)   :: xyz_local(3,n) !@thomas adjust for real deal
-  real(wp)  :: sumCoords
-  integer :: i,j,istatus,fart1(3)
-  character (len=130) :: cwd ! path to current working directory
-  character, allocatable :: emsg(:) ! error message
+  integer, intent(in)    :: n  ! number atoms
+  type(TGFFTopology), intent(in)  :: topo
+  type(TMolecule), intent(in)     :: mol
+  !real(wp), intent(in)   :: xyz(3,n) ! xyz coordinates
+  real(wp)   :: xyz_local(3,n)  ! xyz coordinates copy
   character(len=*), parameter :: source = "gfnff_ffml"
-
-   double precision, dimension(:,:), allocatable :: coefficient !test online exmpl
-!   real(kind=real64), dimension(:,:), allocatable :: coefficient !test online exmpl
-   type(ndarray) :: cof !test online example
+  integer, dimension(2) :: shape_grad
+  real(wp) :: ml_energy, ml_gradient(3,n)
+  real(wp), pointer ,dimension(:,:) :: tmp_point
+  ! forpy types and needed variables
+  type(module_py)  :: ml_module    ! module with all the python functions etc for ML part
+  type(list)       :: paths      ! for adding path to python module
+  type(object)     :: receive_obj  ! python object received from function call or similar
+  type(object)     :: obj1, obj2
+  type(dict)       :: receive_dict
+  type(tuple)      :: args  ! python tuple to feed into ml_function
+  type(ndarray)    :: xyz_arr, tmp1
+  integer          :: ierror  ! return value for forpy methods (error value)
 
   ! initialize forpy
-  !@thomas debug: das schon ganz am anfang in src/prog/main.f90 zu init. funzt auch nicht
-  ierror = forpy_initialize() !@thomas TODO debug: I have NO_NUMPY_ERROR but I need numpy
-                              !  for ndarray_create()
-  write(*,*) ' Initiallized forpy with ierror=',ierror
+  ierror = forpy_initialize()
+  write(*,*) 'Initiallized forpy with ierror=',ierror
+  
   !@thomas_mark01 goto call
-
-  xyz_local=xyz
-  write(*,*) 'xyz array (:,1:5):'
-  write(*,'(3f8.2)') xyz_local(:,1:5)
 
   ! add path of python module file to paths
   !@thomas TODO relativer pfad!?! Geht nicht wenn jmd die xtb binary verwendet -> error handling
@@ -352,41 +346,59 @@ subroutine send_input_to_python_ML_receive_eg(env,n, xyz)
   ! zu "installieren" oder sowas
   ierror = get_sys_path(paths)
   ierror = paths%append(".") ! the module ml_mod.py should be in cwd
-!  ierror = paths%append("/home/thor/miniconda3/envs/ffml") ! my absolute path to python
-!  ierror = paths%append("/home/thor/miniconda3/envs/ffml/lib") ! my absolute path to python
-!  ierror = paths%append("/home/thor/miniconda3/envs/ffml/bin") ! my absolute path to python
-  write(*,*) 'Called paths with ierror=',ierror
-  ierror = import_py(ml_module, "ml_mod") ! omit the .py
-  !write(*,*) 'Called import with ierror=',ierror
+  write(*,*) 'Added path with ierror=',ierror         
   if(ierror.eq.-1)then ! tell user to get module if not found
     !@thomas TODO adjust name of ml_mod.py
     call env%error("Could not import ml_mod.py. Please copy the file into your current working &
       &directory. It is available at https://github.com/grimme-lab/xtb/tree/main/src/gfnff",source)
   endif
 
-!  !@thomas delete: test if loaded properly
-  ierror = call_py(receive_obj, ml_module, "testFct")
-  write(*,*) 'Called testFct with ierror=',ierror
+  ! import python ML module
+  ierror = import_py(ml_module, "ml_mod") ! omit the .py
+  write(*,*) 'Imported ml_module with ierror=',ierror         
 
-  ! create tuple (args) containing arguments for function call
+  ! create tuple (args) containing arguments for ML python function
+  ierror = tuple_create(args, 1)  !@thomas adjust size accordingly
+  ! add coordinates
+  xyz_local=mol%xyz 
   ierror = ndarray_create(xyz_arr, xyz_local)
-  ierror = tuple_create(args, 1)
   ierror = args%setitem(0, xyz_arr)
-!  ierror = print_py(args)
-  ! call function from the python module
+
+  ! call ML function from the python module
   ierror = call_py(receive_obj, ml_module, "receive_ml_input_send_output", args)
   write(*,*) 'Called receive_send_fct with ierror=',ierror
-  ! TODO   ierror above is -1 @thomas 2022 08 18
-  ! xyz_local wird aber richtig übergeben (energy ist gleich)
 
+  ! unpack received object
+  ierror = dict_create(receive_dict)
+  ierror = cast(receive_dict, receive_obj)
+  ! retrieve energy
+  ierror = receive_dict%getitem(obj1, "energy")
+  ierror = cast(ml_energy, obj1)
+  ! retrieve gradient
+  shape_grad(1) = 3  ! define shape 3 dimensions (x y z)
+  shape_grad(2) = n  ! n atoms
+  ierror = ndarray_create_empty(tmp1, shape_grad)
+  ierror = receive_dict%getitem(obj2, "gradient")  ! write gradient into object format
+  ierror = cast(tmp1, obj2)                        ! cast object to ndarray
+  ierror = tmp1%get_data(tmp_point)                ! get pointer to ndarray data
+  ml_gradient = tmp_point                          ! get ml_gradient through pointer
+
+  write(*,'(a,f25.15)') 'Fortran: Receivd ml_energy=',ml_energy
   !print sum(abs(xyz_local)) for reference
-  write(*,'(a,f25.15)') 'Fortran: Energy=',SUM(abs(xyz_local))
+  write(*,'(a,f25.15)') 'Fortran: calculated energy=',SUM(abs(xyz_local))
+  write(*,*) ''
+  write(*,*) ''
+  write(*,*) ''
+  write(*,*) 'Fortran difference calculated and received gradient'
+  write(*,'(3f20.15)') xyz_local*0.1_wp - ml_gradient
 
-if(.false.)then !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-  ! print received object
-  write(*,*) 'Received energy (sum of coords):'
-  ierror = print_py(receive_obj)
-  write(*,*) 'X------------------------------X'
+  call args%destroy
+  call xyz_arr%destroy
+  call receive_obj%destroy
+  call obj1%destroy
+  call obj2%destroy
+  call tmp1%destroy
+  call ml_module%destroy
 
 end subroutine
 

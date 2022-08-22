@@ -42,7 +42,7 @@ use, intrinsic :: iso_c_binding, only: C_CHAR, C_NULL_CHAR, C_INT, C_LONG, C_LON
 
 use, intrinsic :: iso_fortran_env, only: int64, int32, real32, real64
 
-implicit none
+implicit none 
 
 public :: object, type_py, list, dict, tuple, bytes, str, unicode, module_py, &
 NoneType, ndarray, Sequence, MutableSequence, ImmutableSequence, Mapping, &
@@ -247,11 +247,6 @@ end type
 interface
   subroutine Py_Initialize() bind(c, name="Py_Initialize")
   end subroutine
-
-  subroutine Py_SetPath(a_path) bind(c, name="Py_SetPath")  !@thomas
-    import C_CHAR
-    character(kind=C_CHAR), dimension(*) :: a_path
-  end subroutine                                          
 
   function Py_IsInitialized() bind(c, name="Py_IsInitialized") result(r)
     import C_INT
@@ -1983,13 +1978,11 @@ CONTAINS
 
 !> Initialisation of forpy module. Must be called before using forpy.
 function forpy_initialize(use_numpy) result(ierror)
-  import C_CHAR  !@thomas
   !> Set to .false., if you do not need the array features of forpy powered by numpy. (Default: .true.)
   logical, optional, intent(in) :: use_numpy
   integer(kind=C_INT) :: ierror
   
   logical :: numpy_flag
-  character(kind=C_CHAR), dimension(:), allocatable :: a_pypath  !@thomas
 
   if (present(use_numpy)) then
     numpy_flag = use_numpy
@@ -1999,8 +1992,6 @@ function forpy_initialize(use_numpy) result(ierror)
 
   ierror = 1_C_INT
   if (Py_IsInitialized() == 0_C_INT) then
-    !a_pypath="/home/thor/miniconda3/envs/ffml"  !@thomas
-    !call Py_SetPath(a_pypath)  !@thomas
     call Py_Initialize()
   endif
 
@@ -2078,10 +2069,8 @@ function forpy_initialize_numpy() result(ierror)
   type(c_ptr) :: ndarray_str
 
   ! Initialisation of Numpy
-  write(*,*) 'Within forpy_init numpy' 
   global_numpy_mod = PyImport_ImportModule(C_CHAR_"numpy" // C_NULL_CHAR)
   if (.not. c_associated(global_numpy_mod)) then
-    write(*,*) 'a) not c_ass glob'
     ierror = NO_NUMPY_ERROR
     call err_clear
     return
@@ -2091,7 +2080,6 @@ function forpy_initialize_numpy() result(ierror)
     ierror = box_value(asarray_str, "asarray")
     
     if (.not. c_associated(asarray_str)) then
-      write(*,*) 'b) not c_ass str'
       ierror = NO_NUMPY_ERROR
       call err_clear
       return
@@ -2100,7 +2088,6 @@ function forpy_initialize_numpy() result(ierror)
       call Py_Decref(asarray_str)
 
       if (.not. c_associated(global_numpy_asarray_method)) then
-write(*,*) 'c) not c_ass method'
         ierror = NO_NUMPY_ERROR ! Something's wrong with numpy... but might use Python without numpy
         call err_clear
       endif
@@ -2119,7 +2106,6 @@ write(*,*) 'c) not c_ass method'
     call Py_Decref(ndarray_str)
 
     if (.not. c_associated(global_numpy_asarray_method)) then
-    write(*,*) 'd) not c_ass '
       ierror = NO_NUMPY_ERROR ! No Numpy...
       call err_clear
     endif
