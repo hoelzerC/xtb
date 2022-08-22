@@ -237,7 +237,7 @@ subroutine get_atomic_c6_d4(dispm, nat, atoms, gwvec, gwdcn, c6, dc6dcn)
 end subroutine get_atomic_c6_d4
 
 subroutine d3_gradient(dispm, nat, at, xyz, npair, pairlist, zeta_scale, radii, &
-      & r4r2, weighting_factor, dispscale, cn, dcndr, energy, gradient)
+      & r4r2, weighting_factor, dispscale, cn, dcndr, energy, eatoms, gradient)
    use xtb_disp_dftd3param
    use xtb_type_dispersionmodel, only : TDispersionModel
 
@@ -257,6 +257,7 @@ subroutine d3_gradient(dispm, nat, at, xyz, npair, pairlist, zeta_scale, radii, 
    real(wp), intent(in) :: dcndr(:, :, :)
 
    real(wp), intent(inout) :: energy
+   real(wp), intent(inout) :: eatoms(nat)
    real(wp), intent(inout) :: gradient(:, :)
    real(wp) :: sigma(3, 3)
 
@@ -281,7 +282,7 @@ subroutine d3_gradient(dispm, nat, at, xyz, npair, pairlist, zeta_scale, radii, 
    call get_atomic_c6_d4(dispm, nat, at, gw, dgwdcn, c6, dc6dcn)
 
    !$omp parallel do default(none) schedule(runtime) &
-   !$omp reduction(+:energies, gradient, sigma, dEdcn) &
+   !$omp reduction(+:energies, eatoms, gradient, sigma, dEdcn) &
    !$omp shared(at, xyz, npair, pairlist, zeta_scale, dispscale, radii, r4r2, c6, &
    !$omp&       dc6dcn) &
    !$omp private(ij, img, iat, jat, ati, atj, r2, rij, r4r2ij, r0, t6, t8, t10, &
@@ -312,10 +313,12 @@ subroutine d3_gradient(dispm, nat, at, xyz, npair, pairlist, zeta_scale, radii, 
       dS = spread(dG, 1, 3) * spread(rij, 2, 3) * 0.5_wp
 
       energies(iat) = energies(iat) + dE
+      eatoms(iat) = eatoms(iat) + dE
       dEdcn(iat) = dEdcn(iat) - dc6dcn(iat, jat) * disp
       sigma = sigma + dS
       if (iat /= jat) then
          energies(jat) = energies(jat) + dE
+         eatoms(jat) = eatoms(jat) + dE
          dEdcn(jat) = dEdcn(jat) - dc6dcn(jat, iat) * disp
          gradient(:, iat) = gradient(:, iat) + dG
          gradient(:, jat) = gradient(:, jat) - dG
