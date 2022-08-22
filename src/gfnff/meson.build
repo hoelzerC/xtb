@@ -28,6 +28,7 @@ srcs += files(
   'gfnff_qm.f90',
   'gfnff_rab.f',
   'gfnff_setup.f90',
+  'forpy_mod.F90',
   'gfnff_ffml.f90',
   'math.f',
   'mrec.f90',

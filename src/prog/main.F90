@@ -83,7 +83,7 @@ module xtb_prog_main
    use xtb_gfnff_param, only : gff_print
    use xtb_gfnff_topology, only : TPrintTopo
    use xtb_gfnff_convert, only : struc_convert
-   use xtb_gfnff_ffml, only : Tffml, calc_ML_correction, set_ffml
+   use xtb_gfnff_ffml, only : Tffml, calc_ML_correction
    use xtb_scan
    use xtb_kopt
    use xtb_oniom, only : oniom_input, TOniomCalculator
@@ -199,7 +199,6 @@ subroutine xtbMain(env, argParser)
 
    xenv%home = env%xtbhome
    xenv%path = env%xtbpath
-
 
    ! ------------------------------------------------------------------------
    !> read the command line arguments
@@ -907,7 +906,7 @@ subroutine xtbMain(env, argParser)
          write(*,*) 
          call generic_header(iprop,'ML correction for GFN-FF',49,10)
          write(*,*)
-         call calc_ML_correction(ffml,fname,calc%topo,mol)
+         call calc_ML_correction(env,ffml,fname,calc%topo,mol)
 !         write(*,*) 'calc allocated: ',calc%topo%blist !@thomas delete
      end select
 !     write(*,*) 'moltest: ',mol%xyz(:,1)
