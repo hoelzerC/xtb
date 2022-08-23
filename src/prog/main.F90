@@ -853,7 +853,7 @@ subroutine xtbMain(env, argParser)
    if(printTopo%any()) then
      select type(calc)
        type is(TGFFCalculator)
-         call write_json_gfnff_lists(mol%n,calc%topo,chk%nlist,printTopo)
+         call write_json_gfnff_lists(mol%n,calc%topo,calc%ffml,chk%nlist,printTopo)
      end select
    endif
    if ((set%runtyp.eq.p_run_opt).or.(set%runtyp.eq.p_run_ohess).or. &
@@ -1697,6 +1697,8 @@ subroutine selectList(secSplit, printTopo)
       printTopo%hbbond = .true.
    case("eeq")
       printTopo%eeq = .true.
+   case("eatoms")
+      printTopo%eatoms = .true.
    case default
      printTopo%warning = .true.
    end select

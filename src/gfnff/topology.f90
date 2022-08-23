@@ -111,6 +111,7 @@ module xtb_gfnff_topology
      logical :: vangl   = .false.
      logical :: hbbond  = .false.
      logical :: eeq  = .false.
+     logical :: eatoms  = .false.
      logical :: warning = .false.
 
    contains
