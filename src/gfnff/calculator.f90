@@ -33,7 +33,7 @@ module xtb_gfnff_calculator
    use xtb_constrainpot
    use xtb_gfnff_param, only : make_chrg,gff_print
    use xtb_gfnff_data, only : TGFFData
-   use xtb_gfnff_topology, only : TGFFTopology
+   use xtb_gfnff_topology, only : TGFFTopology, Tffml
    use xtb_gfnff_neighbourlist, only : TGFFNeighbourList
    use xtb_gfnff_generator, only : TGFFGenerator
    use xtb_gfnff_eg
@@ -49,12 +49,13 @@ module xtb_gfnff_calculator
       type(TGFFData) :: param
       type(TGFFGenerator) :: gen
       type(TGFFTopology) :: topo
+      type(Tffml) :: ffml  !@thomas
       logical :: update
       integer :: version
 
    contains
 
-      !> Perform xTB single point calculationV
+      !> Perform xTB single point calculation
       procedure :: singlepoint
 
       !> Write informative printout
@@ -201,7 +202,7 @@ subroutine singlepoint(self, env, mol, chk, printlevel, restart, &
    pr = gff_print .and. printlevel > 0
    call gfnff_eg(env,pr,mol%n,nint(mol%chrg),mol%at,mol%xyz,make_chrg, &
       & gradient,energy,results,self%param,self%topo,chk%nlist,solvation,&
-      & self%update,self%version,self%accuracy)
+      & self%update,self%version,self%accuracy,self%ffml)
 
    call env%check(exitRun)
    if (exitRun) then

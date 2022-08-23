@@ -18,7 +18,7 @@
 !> Module  for FF calculation with ML correction
 module xtb_gfnff_ffml
   use xtb_mctc_accuracy, only : wp
-  use xtb_gfnff_topology, only : TGFFTopology 
+  use xtb_gfnff_topology, only : TGFFTopology, Tffml 
   use xtb_type_molecule                        
   use xtb_type_environment
   use xtb_type_restart, only : TRestart
@@ -26,36 +26,22 @@ module xtb_gfnff_ffml
   use xtb_io_writer, only : writeMolecule
   use mctc_io_filetype, only : filetype, getFileType => get_filetype
   use forpy_mod
-  
+
   implicit none
   private
 
-  public :: Tffml, calc_ML_correction
+  public :: calc_ML_correction
 
-
-  ! holds info for ML correction of GFN-FF calculation
-  type :: Tffml
-    logical  :: fixMD
-    !logical  :: runML
-! contains  ! procedures...
-  end type Tffml
+  !@thomas_ffml
+  ! the Tffml type is now in topology due to circular dependencies problem
 
 contains
-
-!! setup type for FF calculation with ML correction
-!subroutine set_ffml(self)
-!  class(Tffml), intent(out) :: self
-!  ! run deterministic MD simulation (0K temperature and fixed shifts)
-!  self%fixMD = .true.
-!!  self%runML = .true.
-!end subroutine set_ffml
 
 ! the actual routine for the ML correction
   !@thomas check if all input is needed
 subroutine calc_ML_correction(env,ffml,fname,topo, mol)
   type(TEnvironment),intent(inout)            :: env
   type(Tffml), intent(in)        :: ffml
-
   character(len=*), intent(in)    :: fname
   type(TGFFTopology), intent(in)  :: topo
   type(TMolecule), intent(in)     :: mol
@@ -63,15 +49,12 @@ subroutine calc_ML_correction(env,ffml,fname,topo, mol)
   type(TGFFTopology)              :: refTopo
   character(len=:), allocatable   :: cmd  !@thomas 
   integer :: ich, sdf_ftype, maxoptcycle, scciter, i
-
   type(TEnvironment) :: envtmp
   type(TMolecule)    :: moltmp
   type(TRestart) :: chktmp
   real(wp) :: egap, etemp, etot, stmp(3,3)
   real(wp), allocatable :: gtmp(:,:)
-
   integer :: ierror
-  
   ! trivial approach: just calling the gen_ref_struc.sh script
 if (.false.) then !<delete !@thomas 
   cmd="~/bin/gen_ref_struc_orig.sh "//fname
@@ -125,7 +108,6 @@ else !<delete
   call ml_struc_convert(envtmp, .false., moltmp, chktmp, egap, &
           etemp, scciter, maxoptcycle, etot, gtmp, stmp, refTopo)
 
-
   !(7)! convert to original file format  ! use mctc file reader and writer
   call open_file(ich, 'ref_struc.xyz', 'w')
   call writeMolecule(moltmp, ich, format=fileType%xyz, energy=etot, &
@@ -134,15 +116,15 @@ else !<delete
   write(*,*) 'Optimized reference structue.'
   write(*,*) 'Geometry is written to ref_struc.xyz'
   write(*,*)
-  write(*,*) '__etot= ', etot
-  write(*,*) '__gnorm= ', NORM2(gtmp)
+  write(*,*) '__ total energy= ', etot
+  write(*,*) '__ gradient norm= ', NORM2(gtmp)
 endif !<delete
 
 
   write(*,*)
 
   !@thomas testing interaction with python functions !@thomas_mark01
-  call send_input_to_python_ML_receive_eg(env, mol%n, mol, topo) 
+  call send_input_to_python_ML_receive_eg(env, mol%n, mol, topo, ffml)
   ! finalize forpy 
   call forpy_finalize
 
@@ -152,7 +134,6 @@ end subroutine calc_ML_correction
 subroutine ml_struc_convert( &
          & env,restart,mol,chk,egap,et,maxiter,maxcycle,&
          & etot,g,sigma,refTopo)
-
   use xtb_mctc_accuracy, only : wp
   use xtb_gfnff_param
   use xtb_gfnff_setup
@@ -181,7 +162,6 @@ subroutine ml_struc_convert( &
   real(wp),intent(inout)                      :: g(3,mol%n)
   real(wp),intent(inout)                      :: sigma(3,3)
   type(TGFFTopology), intent(out)             :: refTopo
-
   logical,intent(in)                          :: restart
   character(len=:),allocatable                :: fnv
 ! Stack -----------------------------------------------------------------------
@@ -268,7 +248,6 @@ subroutine ml_struc_convert( &
 
   mol%xyz(:,:) = mol_xyz_arr(:,:,minloc(etot_arr, DIM=1))  ! keep xyz with lowest etot
 
-
     if (allocated(fnv)) then
       set%opt_logfile = fnv
     else
@@ -303,10 +282,8 @@ subroutine ml_struc_convert( &
   call geometry_optimization &
       &     (env,mol,chk,calc2,   &
       &      egap,set%etemp,maxiter,maxcycle,etot,g,sigma,p_olev_crude,.false.,.true.,fail)
-
   ! save reference topology
   refTopo=calc2%topo
-
 
 !------------------------------------------------------------------------------
   write(*,*)
@@ -321,32 +298,36 @@ subroutine ml_struc_convert( &
 end subroutine ml_struc_convert
 
 
-subroutine send_input_to_python_ML_receive_eg(env,n, mol, topo)
+subroutine send_input_to_python_ML_receive_eg(env,n, mol, topo, ffml)
   use forpy_mod
   use iso_fortran_env, only: real64
   type(TEnvironment),intent(inout)            :: env
   integer, intent(in)    :: n  ! number atoms
-  type(TGFFTopology), intent(in)  :: topo
   type(TMolecule), intent(in)     :: mol
+  type(TGFFTopology), intent(in)  :: topo
+  type(Tffml), intent(in)        :: ffml
   !real(wp), intent(in)   :: xyz(3,n) ! xyz coordinates
   real(wp)   :: xyz_local(3,n)  ! xyz coordinates copy
   character(len=*), parameter :: source = "gfnff_ffml"
   integer, dimension(2) :: shape_grad
-  real(wp) :: ml_energy, ml_gradient(3,n)
+  real(wp) :: ml_energy
+  real(wp) :: ml_gradient(3,n), ml_gradientT(n,3)
+  real(wp) :: calc_grad(3,n) !@thomas delete debug
+  integer :: i,j !@thomas delete debug
   real(wp), pointer ,dimension(:,:) :: tmp_point
   ! forpy types and needed variables
   type(module_py)  :: ml_module    ! module with all the python functions etc for ML part
   type(list)       :: paths      ! for adding path to python module
   type(object)     :: receive_obj  ! python object received from function call or similar
   type(object)     :: obj1, obj2
-  type(dict)       :: receive_dict
+  type(dict)       :: kwargs, receive_dict
   type(tuple)      :: args  ! python tuple to feed into ml_function
-  type(ndarray)    :: xyz_arr, tmp1
+  type(ndarray)    :: xyz_arr, tmp1, eatom_arr
   integer          :: ierror  ! return value for forpy methods (error value)
 
   ! initialize forpy
   ierror = forpy_initialize()
-  write(*,*) 'Initiallized forpy with ierror=',ierror
+  write(*,'(a40,i5)') 'Initiallized forpy with ierror=',ierror
   
   !@thomas_mark01 goto call
 
@@ -357,7 +338,7 @@ subroutine send_input_to_python_ML_receive_eg(env,n, mol, topo)
   ! zu "installieren" oder sowas
   ierror = get_sys_path(paths)
   ierror = paths%append(".") ! the module ml_mod.py should be in cwd
-  write(*,*) 'Added path with ierror=',ierror         
+  write(*,'(a40,i5)') 'Added path with ierror=',ierror
   if(ierror.eq.-1)then ! tell user to get module if not found
     !@thomas TODO adjust name of ml_mod.py
     call env%error("Could not import ml_mod.py. Please copy the file into your current working &
@@ -366,18 +347,23 @@ subroutine send_input_to_python_ML_receive_eg(env,n, mol, topo)
 
   ! import python ML module
   ierror = import_py(ml_module, "ml_mod") ! omit the .py
-  write(*,*) 'Imported ml_module with ierror=',ierror         
+  write(*,'(a40,i5)') 'Imported ml_module with ierror=',ierror
 
   ! create tuple (args) containing arguments for ML python function
-  ierror = tuple_create(args, 1)  !@thomas adjust size accordingly
-  ! add coordinates
+  ierror = tuple_create(args, 0)  !@thomas empty tuple needed for call_py
+  ! create dict containing kwargs
+  ierror = dict_create(kwargs)
+  ! add xyz coordinates
   xyz_local=mol%xyz 
   ierror = ndarray_create(xyz_arr, xyz_local)
-  ierror = args%setitem(0, xyz_arr)
+  ierror = kwargs%setitem("xyz", xyz_arr)
+  ! add atom wise energy
+  ierror = ndarray_create(eatom_arr, ffml%eatoms)
+  ierror = kwargs%setitem("eatoms", eatom_arr)
 
   ! call ML function from the python module
-  ierror = call_py(receive_obj, ml_module, "receive_ml_input_send_output", args)
-  write(*,*) 'Called receive_send_fct with ierror=',ierror
+  ierror = call_py(receive_obj, ml_module, "receive_ml_input_send_output", args, kwargs)
+  write(*,'(a40,i5)') 'Called receive_send_fct with ierror=',ierror
 
   ! unpack received object
   ierror = dict_create(receive_dict)
@@ -391,24 +377,40 @@ subroutine send_input_to_python_ML_receive_eg(env,n, mol, topo)
   ierror = ndarray_create_empty(tmp1, shape_grad)
   ierror = receive_dict%getitem(obj2, "gradient")  ! write gradient into object format
   ierror = cast(tmp1, obj2)                        ! cast object to ndarray
-  ierror = tmp1%get_data(tmp_point)                ! get pointer to ndarray data
+  ierror = tmp1%get_data(tmp_point,'A')                ! get pointer to ndarray data
+
   ml_gradient = tmp_point                          ! get ml_gradient through pointer
 
-  write(*,'(a,f25.15)') 'Fortran: Receivd ml_energy=',ml_energy
-  !print sum(abs(xyz_local)) for reference
-  write(*,'(a,f25.15)') 'Fortran: calculated energy=',SUM(abs(xyz_local))
-  write(*,*) ''
-  write(*,*) ''
-  write(*,*) ''
-  write(*,*) 'Fortran difference calculated and received gradient'
-  write(*,'(3f20.15)') xyz_local*0.1_wp - ml_gradient
+  ! calculate gradient directly in fortran
+  do i=1, 3
+    do j=1, n
+      calc_grad(i,j) = xyz_local(i,j)*ffml%eatoms(j)
+    enddo
+  enddo
 
+  ! warning for future me !@thomas
+  write(*,*) ''
+  write(*,*) '!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!'
+  write(*,*) '  when using actual ML python module  '
+  write(*,*) '    check what format gradient has    '
+  write(*,*) '           (3,n) vs (n,3)             '
+  write(*,*) '!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!'
+!@thomas test for data transfer
+  write(*,*) ''
+  write(*,*) '-- -- -- Testing of data transfer -- -- --'
+  write(*,'(a,f25.15)') 'Fortran: Receivd ml_energy=',ml_energy
+  write(*,'(a,f25.15)') 'Fortran: calculated energy=',SUM(abs(xyz_local))
+  write(*,'(a)') 'Fortran: difference between calculated and received gradient'
+  write(*,'(a,f20.15)') 'Sum should be zero:', SUM(abs(calc_grad - ml_gradient))
+  write(*,*) '-- -- -- -- -- -- -- -- -- -- -- -- -- -- '
   call args%destroy
-  call xyz_arr%destroy
+  call paths%destroy
   call receive_obj%destroy
   call obj1%destroy
   call obj2%destroy
+  call receive_dict%destroy
   call tmp1%destroy
+  call xyz_arr%destroy
   call ml_module%destroy
 
 end subroutine

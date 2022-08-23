@@ -81,9 +81,9 @@ module xtb_prog_main
    use xtb_disp_dftd3param
    use xtb_disp_dftd4
    use xtb_gfnff_param, only : gff_print
-   use xtb_gfnff_topology, only : TPrintTopo
+   use xtb_gfnff_topology, only : TPrintTopo, Tffml
    use xtb_gfnff_convert, only : struc_convert
-   use xtb_gfnff_ffml, only : Tffml, calc_ML_correction
+   use xtb_gfnff_ffml, only : calc_ML_correction
    use xtb_scan
    use xtb_kopt
    use xtb_oniom, only : oniom_input, TOniomCalculator
@@ -195,7 +195,6 @@ subroutine xtbMain(env, argParser)
    integer :: nproc
 
    type(TPrintTopo) :: printTopo ! gfnff topology printout list
-   type(Tffml)  :: ffml ! holds info for ML correction of GFN-FF calculation
 
    xenv%home = env%xtbhome
    xenv%path = env%xtbpath
@@ -203,7 +202,7 @@ subroutine xtbMain(env, argParser)
    ! ------------------------------------------------------------------------
    !> read the command line arguments
    call parseArguments(env, argParser, xcontrol, fnv, acc, lgrad, &
-      & restart, gsolvstate, strict, copycontrol, coffee, printTopo, ffml, oniom)
+      & restart, gsolvstate, strict, copycontrol, coffee, printTopo, oniom)
 
    nFiles = argParser%countFiles()
    select case(nFiles)
@@ -578,6 +577,10 @@ subroutine xtbMain(env, argParser)
 
    ! ========================================================================
    !> the SP energy which is always done
+   select type(calc)
+   type is(TGFFCalculator)
+     allocate(calc%ffml%eatoms(mol%n), source=0.0_wp) !@thomas_ffml atom wise energy for ML
+   end select
    call start_timing(2)
    call calc%singlepoint(env,mol,chk,2,exist,etot,g,sigma,egap,res)
    call stop_timing(2)
@@ -906,13 +909,17 @@ subroutine xtbMain(env, argParser)
          write(*,*) 
          call generic_header(iprop,'ML correction for GFN-FF',49,10)
          write(*,*)
-         call calc_ML_correction(env,ffml,fname,calc%topo,mol)
+         call calc_ML_correction(env,calc%ffml,fname,calc%topo,mol)
 !         write(*,*) 'calc allocated: ',calc%topo%blist !@thomas delete
      end select
 !     write(*,*) 'moltest: ',mol%xyz(:,1)
 !     write(*,*) 'etot: ', etot
 !     write(*,*) 'g:',g(:,1)
    endif
+   select type(calc)
+   type is(TGFFCalculator)
+     deallocate(calc%ffml%eatoms) !@thomas_ffml
+   end select
 
 
    ! ------------------------------------------------------------------------
@@ -1105,7 +1112,7 @@ end subroutine xtbMain
 
 !> Parse command line arguments and forward them to settings
 subroutine parseArguments(env, args, inputFile, paramFile, accuracy, lgrad, &
-      & restart, gsolvstate, strict, copycontrol, coffee, printTopo, ffml, oniom)
+      & restart, gsolvstate, strict, copycontrol, coffee, printTopo, oniom)
    use xtb_mctc_global, only : persistentEnv
 
    !> Name of error producer
@@ -1140,9 +1147,6 @@ subroutine parseArguments(env, args, inputFile, paramFile, accuracy, lgrad, &
 
    !> topology printout list
    type(TPrintTopo), intent(out) :: printTopo
-
-   ! holds info for ML correction of GFN-FF calculation
-   type(Tffml), intent(out)  :: ffml
 
    !> Print the gradient to file
    logical, intent(out) :: lgrad
@@ -1616,11 +1620,7 @@ subroutine parseArguments(env, args, inputFile, paramFile, accuracy, lgrad, &
          endif
 
       case('--ml')  ! apply ML correction to GFN-FF calculation
-         !call set_ffml(ffml)
          call set_runtyp('ml')
-
- case('--fixedMD')  !@thomas delete important: dont need this anymore
-         ffml%fixMD=.True.
 
       end select
       call args%nextFlag(flag)
