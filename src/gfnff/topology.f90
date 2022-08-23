@@ -22,7 +22,7 @@ module xtb_gfnff_topology
    implicit none
    private
 
-   public :: TGFFTopology, TPrintTopo
+   public :: TGFFTopology, TPrintTopo, Tffml !@thomas_ffml
 
 
    !> Topology information for a given system
@@ -118,6 +118,12 @@ module xtb_gfnff_topology
    procedure :: any
 
    end type TPrintTopo
+
+   ! holds info for ML correction of GFN-FF calculation !@thomas_ffml
+   type :: Tffml
+     real(wp), allocatable   :: eatoms(:) ! atom wise energy calculated in gfnff_eg
+   end type Tffml
+
 
 contains
 
