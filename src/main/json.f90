@@ -247,13 +247,14 @@ contains
     write (ijson, '(3x,f15.8,"],")') freqres%rmass(freqres%n3true)
   end subroutine write_json_reduced_masses
 
-  subroutine write_json_gfnff_lists(n, topo, nlist, printTopo)
+  subroutine write_json_gfnff_lists(n, topo, ffml, nlist, printTopo)
     use xtb_gfnff_topology, only: TGFFTopology
     use xtb_gfnff_neighbourlist, only: TGFFNeighbourList
-    use xtb_gfnff_topology, only: TPrintTopo
+    use xtb_gfnff_topology, only: TPrintTopo, Tffml
     include 'xtb_version.fh'
     !> gfnff topology lists
     type(TGFFTopology), intent(in) :: topo
+    type(Tffml), intent(in) :: ffml
     !> gfnff neighbourlist
     type(TGFFNeighbourList), intent(in) :: nlist
     !> topology printout booleans
@@ -421,6 +422,16 @@ contains
         write (iunit, '("],")')
       end do
       write (iunit, '(3x,"[",*(f25.15,:,","),"]",/)', advance='no') nlist%q(size(nlist%q))
+      write (iunit, '("]")')
+      write (iunit, '(3x,"],")')
+    end if
+    if (printTopo%eatoms) then ! eatoms(n) atom wise energy
+      write (iunit, '(3x,''"eatoms":'',"[")')
+      do j = 1, n - 1
+        write (iunit, '(3x,"[",*(f25.15,:,","))', advance='no') ffml%eatoms(j)
+        write (iunit, '("],")')
+      end do
+      write (iunit, '(3x,"[",*(f25.15,:,","),"]",/)', advance='no') ffml%eatoms(n)
       write (iunit, '("]")')
       write (iunit, '(3x,"],")')
     end if

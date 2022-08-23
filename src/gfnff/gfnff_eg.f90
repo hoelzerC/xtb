@@ -638,20 +638,6 @@ contains
      ffml%eatoms=tmp_eatoms
    endif
 
-!@thor delete section, write eatoms in topo file
-open(111, file = 'gfnff_eatoms',action='write')
- 
-   ! write difference in first line to check correctness
-   write (111,*) etot -sum(tmp_eatoms), NEW_LINE('A')
-   
-   do i=1, n
-
-   write(111,'(F0.12)') tmp_eatoms(i)
-
-end do 
-close(111) 
-
-!@thor end delete section
 !!!!!!!!!!!!!!!!!!
 ! printout
 !!!!!!!!!!!!!!!!!!
