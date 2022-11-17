@@ -1,6 +1,6 @@
 # This file is part of xtb.
 #
-# Copyright (C) 2019-2020 Sebastian Ehlert
+# Copyright (C) 2022 Sebastian Ehlert, Christoph Plett
 #
 # xtb is free software: you can redistribute it and/or modify it under
 # the terms of the GNU Lesser General Public License as published by
@@ -15,14 +15,15 @@
 # You should have received a copy of the GNU Lesser General Public License
 # along with xtb.  If not, see <https://www.gnu.org/licenses/>.
 
-prog += files(
-  'argparser.f90',
-  'dock.f90',
-  'info.f90',
-  'irmod.f90',
-  'main.F90',
-  'primary.f90',
-  'submodules.f90',
-  'thermo.f90',
-  'topology.f90',
+set(dir "${CMAKE_CURRENT_SOURCE_DIR}")
+
+list(APPEND srcs
+  "${dir}/calculator.f90"
+  "${dir}/data.f90"
+  "${dir}/iff_energy.f90"
+  "${dir}/iff_ini.f90"
+  "${dir}/iff_lmo.f90"
+  "${dir}/iff_prepare.f90"
 )
+
+set(srcs ${srcs} PARENT_SCOPE)
